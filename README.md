@@ -1,57 +1,67 @@
-# WordPress Security Scanner & Auto-Remediator
+# WordPress Security Audit & Auto-Remediation Suite
+### Comprehensive Operational Guide & Architecture Documentation (Scanner v5.1 / Remediator v3.1)
 
-A simple Bash tool suite for security auditing and automatic remediation of WordPress sites. The scanner identifies vulnerabilities and generates a detailed report, while the remediator parses the report and applies critical security fixes directly to your server.
-
----
-
-## 🛠️ What the Scripts Do
-
-### 1. `scanner.sh` (Security Audit)
-- **Core Integrity Check**: Compares core WordPress files against official hashes from `wordpress.org`.
-- **Malware & Webshell Scan**: Searches for suspicious code patterns and backdoors inside `wp-content/`.
-- **Unsafe Uploads Inspection**: Detects executable `.php` scripts uploaded inside `wp-content/uploads/`.
-- **File Permissions Audit**: Flags dangerous `777` directory permissions and insecure `wp-config.php` permissions.
-- **Hardening & Database Checks**: Audits security directives in `wp-config.php` and scans for database script injections via WP-CLI.
-- **Security Score & Report**: Generates a timestamped report file (`relatorio_seguranca_*.txt`) with a 0–100 score.
-
-### 2. `remediador.sh` (Auto-Fix)
-- **Fixes Permissions**: Changes `777` directories to `755` and hardens `wp-config.php` to `640`.
-- **Blocks Dashboard Code Editor**: Injects `DISALLOW_FILE_EDIT` into `wp-config.php`.
-- **Isolates PHP in Uploads**: Quarantines `.php` files inside uploads and creates an `.htaccess` rule blocking script execution.
-- **Restores Native WP Core**: Overwrites modified/corrupted core files with clean official code (requires WP-CLI).
-- **Cleanup**: Removes junk dot-files (such as `.DS_Store`).
+A simple, powerful Bash tool suite for security auditing and automatic remediation of WordPress sites. The scanner identifies vulnerabilities and generates a detailed report, while the remediator parses the report and applies critical security fixes directly to your server.
 
 ---
 
-## 🚀 Installation & Execution
+## 📄 Executive Overview
 
-### 1. Clone the repository
+The WordPress Security Audit & Auto-Remediation Suite consists of two shell scripts designed to run natively within Linux server environments hosting WordPress installations. The pair operates in a closed-loop security workflow:
+
+1. `scanner.sh` performs enterprise-grade vulnerability scanning and risk assessment.
+2. `remediador.sh` automatically ingests the scanner's output report and applies hardening fixes to eliminate identified security flaws.
+
+---
+
+## 🛠️ System Components & Architecture
+
+### 1. Scanner Script (`scanner.sh` v5.1)
+The auditing agent conducts non-destructive static and dynamic checks across 13 distinct vectors of the target WordPress directory:
+
+- **Core Integrity Check**: Queries the official `api.wordpress.org` REST endpoint to fetch MD5 checksum hashes matching the exact installed WordPress version and locale. It verifies all core files against these official signatures to detect tampered core code.
+- **Malware & Webshell Scan**: Scans the `wp-content/` directory for high-risk structural regex patterns, such as obfuscated execution constructs (`eval`, `base64_decode`, `gzinflate`, `str_rot13`, and backdoor superglobal invocations).
+- **Uploads & Hidden Files Inspection**: Detects malicious executable `.php` scripts disguised inside the `wp-content/uploads/` media directory and audits unexpected dot-files across the web root.
+- **Permissions & Linux Hardening Audit**: Identifies dangerous global permissions (`CHMOD 777`) on directories and overly permissive settings on `wp-config.php`.
+- **WP Configuration Hardening Audit**: Checks if file editing via the WP Admin dashboard is disabled (`DISALLOW_FILE_EDIT`) and verifies whether default, unsecure salt keys are still present in `wp-config.php`.
+- **Database Script Injection Inspection**: Utilizes WP-CLI (if available) to scan the `wp_options` table for inline cross-site scripting (XSS) or malicious `<script>` tags.
+- **Hidden Admins Audit**: Uses WP-CLI to audit registered administrator users.
+- **Smart Recents Filter**: Monitors modified files in `wp-content/` within the last 48 hours while automatically ignoring false positives from translation/language updates (`wp-content/languages/`).
+- **Critical Files Audit**: Verifies structural integrity for root files like `.htaccess`, `index.php`, and `robots.txt`.
+- **External Redirect Detection**: Tests user-agent spoofing (Googlebot/Mobile) specifically for malicious external domain redirects.
+- **Backup & Dump Exposure Scan**: Deeply scans the entire directory tree for exposed `.sql`, `.zip`, `.tar.gz`, and `.bak` files.
+- **WP-Cron & Post Audit**: Audits scheduled tasks while filtering native WP hooks (e.g., `wp_delete_temp_updater_backups`) and checks `wp_posts` for hidden iFrames or spam scripts.
+- **Security Score & Report**: Generates a timestamped report file (`relatorio_seguranca_*.txt`) with a 0–100 score and visual dashboard.
+
+### 2. Remediation Agent (`remediador.sh` v3.1)
+The auto-healing agent parses the latest security report generated by `scanner.sh` using fuzzy regex patterns. If matching vulnerabilities are identified, it applies targeted corrective actions:
+
+- **Isolated Emergency Backup**: Exports database SQL dumps and compresses plugins into `/tmp/` (outside the web root) before making changes, preventing scanner detection of backup files.
+- **Deep Residual Cleanup**: Completely eliminates exposed `.zip`, `.sql`, `.tar.gz`, `.bak`, and temporary `.DS_Store` files across all project directory levels.
+- **Permission Remediation**: Restricts `wp-config.php` permissions to `640` and resets dangerous `777` directory permissions back to the secure standard `755`.
+- **Dashboard & Indexing Hardening**: Injects `define('DISALLOW_FILE_EDIT', true);` into `wp-config.php` and disables directory indexing (`Options -Indexes`) in `.htaccess`.
+- **Uploads Quarantine & Isolation**: Appends a `.quarentena` extension to PHP files found in `wp-content/uploads/` and automatically creates a restrictive `.htaccess` file denying script execution in the uploads directory.
+- **Core Restoration & Updates**: Re-downloads clean official WP core files and updates all plugins/themes via WP-CLI.
+- **Admin Security & Cleanup**: Resets administrative passwords, purges inactive plugins/themes, and updates the final report with a comparative before-and-after score.
+
+---
+
+## 📋 Prerequisites & Environment Requirements
+
+| Requirement / Tool | Status | Purpose |
+| :--- | :--- | :--- |
+| **Linux OS / Bash Shell** | Mandatory | Bash 4.0+ with basic GNU tools (`find`, `grep`, `sed`, `stat`, `chmod`). |
+| **cURL & md5sum** | Mandatory | Required for fetching WordPress official checksums and verifying hashes. |
+| **WordPress Installation** | Mandatory | Scripts must be run directly from the root directory of the WP installation. |
+| **WP-CLI** | Optional | Enables DB script injection checks, user audits, and automatic WP core restoration. |
+
+---
+
+## 🚀 Step-by-Step Installation & Usage Guide
+
+### Step 1: Deployment & Placement
 Navigate to your WordPress root directory (where `wp-config.php` is located) and clone the repository:
 
 ```bash
-cd /path/to/your/wordpress
+cd /var/www/html/my-wordpress-site/
 git clone git@github.com:EduToledoSoma/scanner-seguranca.git .
-```
-
-### 2. Grant execution permissions
-Make both shell scripts executable:
-
-```bash
-chmod +x scanner.sh remediador.sh
-```
-
-### 3. Run the Security Scanner
-Run the audit script to analyze your WordPress site:
-
-```bash
-./scanner.sh
-```
-
-### 4. Run the Auto-Remediator
-Apply automatic fixes based on the generated scan report:
-
-```bash
-./remediador.sh
-```
-
-> **Tip:** After running the remediator, re-run `./scanner.sh` to confirm your site score reaches **100/100**.
