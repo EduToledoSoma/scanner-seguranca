@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==============================================================================
-# WP-SECURITY AGENT ENTERPRISE v5.0 (AUDITORIA E DEFESA DE ALTA PRECISÃO)
+# WP-SECURITY AGENT ENTERPRISE v5.1 (AUDITORIA E DEFESA DE ALTA PRECISÃO)
 # ==============================================================================
 
 DATA_HORA=$(date +"%Y-%m-%d_%H-%M-%S")
@@ -30,20 +30,20 @@ echo "  ██║██╔██╗ ██║███████╗███�
 echo "  ██║██║╚██╗██║╚════██║██╔═══╝ ██╔══╝  ██╔══██╗╚════██║   ██║   "
 echo "  ██║██║ ╚████║███████║██║     ███████╗██║  ██║███████║   ██║   "
 echo "  ╚═╝╚═╝  ╚═══╝╚══════╝╚═╝     ╚══════╝╚═╝  ╚═╝╚══════╝   ╚═╝   "
-echo -e "       AGENTE DE SEGURANÇA ENTERPRISE v5.0 - WORDPRESS ${C_RESET}"
+echo -e "       AGENTE DE SEGURANÇA ENTERPRISE v5.1 - WORDPRESS ${C_RESET}"
 echo -e "${C_BLUE}=================================================================${C_RESET}"
 echo -e " Diretório: ${C_BOLD}${WP_ROOT}${C_RESET}"
 echo -e " Data      : ${C_BOLD}${DATA_HORA}${C_RESET}"
 echo -e "${C_BLUE}=================================================================${C_RESET}\n"
 
-# Função auxiliar para salvar no relatório sem poluir stdout
+# Função auxiliar para salvar no relatório
 log_txt() {
     echo -e "$1" >> "$RELATORIO"
 }
 
 # Inicializa arquivo de texto
 echo "=================================================================" > "$RELATORIO"
-echo "       RELATÓRIO DE AUDITORIA DE SEGURANÇA ENTERPRISE v5.0       " >> "$RELATORIO"
+echo "       RELATÓRIO DE AUDITORIA DE SEGURANÇA ENTERPRISE v5.1       " >> "$RELATORIO"
 echo "=================================================================" >> "$RELATORIO"
 echo "Data/Hora: $DATA_HORA" >> "$RELATORIO"
 echo "Diretório: $WP_ROOT" >> "$RELATORIO"
@@ -248,7 +248,8 @@ echo -e "${C_YELLOW}[8/13] Escaneando Arquivos Modificados/Criados nas últimas 
 log_txt "[8] ARQUIVOS RECENTES EM WP-CONTENT (ÚLTIMAS 48H)"
 log_txt "-----------------------------------------------------------------"
 
-RECENT_FILES=$(find wp-content/ -type f -mtime -2 2>/dev/null)
+# Ignores automatizados: Pastas de traduções/idiomas
+RECENT_FILES=$(find wp-content/ -type f -mtime -2 ! -path "wp-content/languages/*" 2>/dev/null)
 
 if [ -n "$RECENT_FILES" ]; then
     RECENT_COUNT=$(echo "$RECENT_FILES" | wc -l)
@@ -273,8 +274,8 @@ CRITICAL_FILES=(".htaccess" "index.php" "robots.txt")
 
 for c_file in "${CRITICAL_FILES[@]}"; do
     if [ -f "$c_file" ]; then
-        if grep -qE "(eval|base64_decode|gzinflate|auto_prepend_file|RewriteCond.*http)" "$c_file"; then
-            log_txt "[CRÍTICO] Injeção de código ou redirecionamento suspeito detectado em: $c_file"
+        if grep -qE "(eval|base64_decode|gzinflate|auto_prepend_file)" "$c_file"; then
+            log_txt "[CRÍTICO] Injeção de código ou instrução suspeita detectada em: $c_file"
             ((CRITICAL_COUNT++))
             echo -e "  ${C_RED}✗ Suspeita de adulteração no arquivo crítico: $c_file${C_RESET}"
         else
@@ -286,42 +287,40 @@ echo -e "  ${C_GREEN}✓ Validação de arquivos estruturais concluída${C_RESET
 echo "" >> "$RELATORIO"
 
 # ------------------------------------------------------------------------------
-# 10. DETECÇÃO DE REDIRECIONAMENTOS MALICIOSOS (SPAM REDIRECTS)
+# 10. DETECÇÃO DE REDIRECIONAMENTOS MALICIOSOS (EXTERNAL SPAM REDIRECTS)
 # ------------------------------------------------------------------------------
-echo -e "${C_YELLOW}[10/13] Testando Redirecionamentos Ocultos (Googlebot / Mobile)...${C_RESET}"
+echo -e "${C_YELLOW}[10/13] Testando Redirecionamentos Ocultos Externos...${C_RESET}"
 log_txt "[10] TESTE DE REDIRECIONAMENTO MALICIOSO (UA SPOOFING)"
 log_txt "-----------------------------------------------------------------"
 
 if command -v curl &> /dev/null; then
-    SITE_URL=$(grep "WP_HOME\|WP_SITEURL" wp-config.php 2>/dev/null | cut -d"'" -f4 | head -n 1)
+    SITE_HOST=$(grep -E "WP_HOME|WP_SITEURL" wp-config.php 2>/dev/null | cut -d"'" -f4 | awk -F/ '{print $3}' | head -n 1)
     
-    if [ -z "$SITE_URL" ] && command -v wp &> /dev/null && wp core is-installed --allow-root &>/dev/null; then
-        SITE_URL=$(wp option get siteurl --allow-root 2>/dev/null)
+    if [ -z "$SITE_HOST" ] && command -v wp &> /dev/null && wp core is-installed --allow-root &>/dev/null; then
+        SITE_HOST=$(wp option get siteurl --allow-root 2>/dev/null | awk -F/ '{print $3}')
     fi
 
-    if [ -n "$SITE_URL" ]; then
-        # Simula visualização de Smartphone Android
-        HTTP_MOBILE=$(curl -s -I -A "Mozilla/5.0 (Linux; Android 10; SM-G960F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/88.0.4324.181 Mobile Safari/537.36" "$SITE_URL" | grep -i "^location:")
-        
-        # Simula Crawler do Googlebot
-        HTTP_GOOGLE=$(curl -s -I -A "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)" "$SITE_URL" | grep -i "^location:")
+    if [ -n "$SITE_HOST" ]; then
+        # Filtra apenas redirecionamentos para domínios EXTERNOS
+        HTTP_MOBILE=$(curl -s -I -A "Mozilla/5.0 (Linux; Android 10; SM-G960F)" "http://localhost" 2>/dev/null | grep -i "^location:" | grep -v "$SITE_HOST")
+        HTTP_GOOGLE=$(curl -s -I -A "Mozilla/5.0 (compatible; Googlebot/2.1)" "http://localhost" 2>/dev/null | grep -i "^location:" | grep -v "$SITE_HOST")
         
         if [ -n "$HTTP_MOBILE" ] || [ -n "$HTTP_GOOGLE" ]; then
-            log_txt "[CRÍTICO] Redirecionamento condicional ativo detectado!"
+            log_txt "[CRÍTICO] Redirecionamento malicioso externo detectado!"
             [ -n "$HTTP_MOBILE" ] && log_txt "  Location (Mobile): $HTTP_MOBILE"
             [ -n "$HTTP_GOOGLE" ] && log_txt "  Location (Googlebot): $HTTP_GOOGLE"
             ((CRITICAL_COUNT++))
-            echo -e "  ${C_RED}✗ Redirecionamento suspeito detectado para bots/mobile!${C_RESET}"
+            echo -e "  ${C_RED}✗ Redirecionamento externo malicioso detectado!${C_RESET}"
         else
-            log_txt "[OK] Nenhum redirecionamento suspeito para User-Agents de bots ou dispostivos móveis."
-            echo -e "  ${C_GREEN}✓ Respostas HTTP limpas para Googlebot e Mobile${C_RESET}"
+            log_txt "[OK] Nenhum redirecionamento externo malicioso detectado."
+            echo -e "  ${C_GREEN}✓ Respostas HTTP limpas de redirecionamentos externos${C_RESET}"
         fi
     else
-        log_txt "[INFO] URL do site não identificada para o teste de redirecionamento HTTP."
-        echo -e "  ${C_BLUE}ℹ URL não identificada. Teste ignorado.${C_RESET}"
+        log_txt "[INFO] Domínio do site não identificado para teste de redirecionamento."
+        echo -e "  ${C_BLUE}ℹ Teste de redirecionamento ignorado.${C_RESET}"
     fi
 else
-    log_txt "[AVISO] curl não disponível para simular User-Agents."
+    log_txt "[AVISO] curl não disponível para teste de User-Agent."
 fi
 echo "" >> "$RELATORIO"
 
@@ -332,7 +331,8 @@ echo -e "${C_YELLOW}[11/13] Escaneando Backups Esquecidos e Arquivos Temporário
 log_txt "[11] ARQUIVOS TEMPORÁRIOS E BACKUPS EXPOSTOS"
 log_txt "-----------------------------------------------------------------"
 
-DANGEROUS_EXT=$(find . -maxdepth 3 -type f \( -name "*.zip" -o -name "*.tar.gz" -o -name "*.sql" -o -name "*.bak" -o -name "*.old" -o -name "wp-config.php*" \) ! -name "wp-config.php" 2>/dev/null)
+# Busca recursiva em profundidade total na pasta do projeto
+DANGEROUS_EXT=$(find . -type f \( -name "*.zip" -o -name "*.tar.gz" -o -name "*.sql" -o -name "*.bak" -o -name "*.old" -o -name "wp-config.php*" \) ! -name "wp-config.php" 2>/dev/null)
 
 if [ -n "$DANGEROUS_EXT" ]; then
     log_txt "[ALTO] Arquivos de backup/temporários sensíveis encontrados no servidor:"
@@ -341,7 +341,7 @@ if [ -n "$DANGEROUS_EXT" ]; then
     ((HIGH_COUNT+=COUNT))
     echo -e "  ${C_RED}✗ $COUNT arquivo(s) de backup ou arquivos .sql/.zip expostos!${C_RESET}"
 else
-    log_txt "[OK] Nenhum arquivo de backup solto ou dump SQL identificado na raiz."
+    log_txt "[OK] Nenhum arquivo de backup solto ou dump SQL identificado no servidor."
     echo -e "  ${C_GREEN}✓ Nenhum backup residual (.zip, .sql, .bak) detectado${C_RESET}"
 fi
 echo "" >> "$RELATORIO"
@@ -358,8 +358,8 @@ if command -v wp &> /dev/null && wp core is-installed --allow-root &>/dev/null; 
     log_txt "[INFO] Lista de eventos agendados no WP-Cron:"
     log_txt "$CRON_EVENTS"
     
-    # Busca por padrões suspeitos nas rotinas cron
-    SUSPICIOUS_CRON=$(echo "$CRON_EVENTS" | grep -Ei "eval|base64|temp_|shell|exec")
+    # Filtra mantendo apenas palavras maliciosas e desconsiderando rotinas nativas do WordPress
+    SUSPICIOUS_CRON=$(echo "$CRON_EVENTS" | grep -v "wp_delete_temp_updater_backups" | grep -Ei "eval|base64|shell_exec|system\(")
     if [ -n "$SUSPICIOUS_CRON" ]; then
         log_txt "[CRÍTICO] Hook suspeito identificado no WP-Cron:"
         log_txt "$SUSPICIOUS_CRON"
@@ -383,7 +383,7 @@ log_txt "[13] AUDITORIA DE CONTEÚDO MALICIOSO (WP_POSTS)"
 log_txt "-----------------------------------------------------------------"
 
 if command -v wp &> /dev/null && wp core is-installed --allow-root &>/dev/null; then
-    MALICIOUS_POSTS=$(wp db query "SELECT ID, post_title FROM \$(wp db prefix --allow-root)posts WHERE post_content LIKE '%<iframe%' OR post_content LIKE '%display:none%' OR post_content LIKE '%visibility:hidden%' OR post_content LIKE '%eval(%' AND post_status = 'publish';" --allow-root 2>/dev/null)
+    MALICIOUS_POSTS=$(wp db query "SELECT ID, post_title FROM \$(wp db prefix --allow-root)posts WHERE (post_content LIKE '%<iframe%' OR post_content LIKE '%display:none%' OR post_content LIKE '%visibility:hidden%' OR post_content LIKE '%eval(%') AND post_status = 'publish';" --allow-root 2>/dev/null)
     
     if [ -n "$MALICIOUS_POSTS" ]; then
         log_txt "[ALTO] iFrames invisíveis ou trechos maliciosos em wp_posts:"
@@ -437,13 +437,14 @@ log_txt "Ameaças Críticas Found : $CRITICAL_COUNT"
 log_txt "Ameaças Altas Found    : $HIGH_COUNT"
 log_txt "Ameaças Médias Found   : $MEDIUM_COUNT"
 log_txt "-----------------------------------------------------------------"
-log_txt "NOTA DE SEGURANÇA      : $STARS ($SCORE/100)"
+log_txt "PONTUAÇÃO              : $SCORE/100"
+log_txt "NOTA DE SEGURANÇA      : $STARS"
 log_txt "NÍVEL DE RISCO         : $RISCO_TEXTO"
 log_txt "================================================================="
 
 # Renderiza Dashboard no Terminal
 echo -e "${C_BLUE}=================================================================${C_RESET}"
-echo -e "                   ${C_BOLD}DASHBOARD DE AUDITORIA v5.0${C_RESET}                   "
+echo -e "                   ${C_BOLD}DASHBOARD DE AUDITORIA v5.1${C_RESET}                   "
 echo -e "${C_BLUE}=================================================================${C_RESET}"
 printf "  %-28s : %s\n" "Ameaças Críticas" "${CRITICAL_COUNT}"
 printf "  %-28s : %s\n" "Ameaças Altas" "${HIGH_COUNT}"
